@@ -856,6 +856,8 @@ async function enrichBook(id){
   let r=pickBest(res,b);
   const isbnBad=isbn&&res.length&&!r; // ese ISBN es de otro libro: no lo uso para la portada
   if(!r&&isbn&&b.title){try{res=await searchOnline(`${b.title} ${(b.author||'').split(',')[0]}`.trim());r=pickBest(res,{...b,isbn:''})}catch(e){}}
+  // a veces el autor está apuntado distinto («Sherry» por «Sherrilyn»): pruebo solo con el título
+  if(!r&&b.title&&b.author){try{res=await searchOnline(b.title.replace(/\(.*?\)/g,'').trim());r=pickBest(res,{...b,isbn:''})}catch(e){}}
   b=byId(id);if(!b)return;
   if(r){
     // el ISBN solo si el resultado es de verdad su edición (buscada por ISBN); si no, podría ser el de otra edición
