@@ -264,6 +264,17 @@ details summary{cursor:pointer;color:var(--muted);margin-top:10px}
 .welcome .row{justify-content:center;margin-top:16px;flex-wrap:wrap}
 .toast{position:fixed;bottom:22px;left:50%;transform:translate(-50%,30px);background:var(--surface-2);border:1px solid var(--accent);padding:10px 20px;border-radius:999px;opacity:0;transition:.3s;z-index:90;pointer-events:none;box-shadow:0 10px 30px rgba(0,0,0,.5)}
 .toast.show{opacity:1;transform:translate(-50%,0)}
+.genres{margin-bottom:8px}
+.genres .chip{font-size:14px;padding:3px 10px}
+.bgtask{position:fixed;left:16px;bottom:76px;z-index:80;background:var(--surface-2);border:1px solid var(--accent);color:var(--text);padding:8px 16px;border-radius:999px;font-size:14px;box-shadow:0 10px 30px rgba(0,0,0,.45);display:flex;gap:10px;align-items:center;max-width:calc(100vw - 32px)}
+.bgtask[hidden]{display:none}
+.bgtask .ic{width:16px;height:16px;color:var(--accent);animation:pulse 1.2s ease-in-out infinite}
+.imp-table{width:100%;border-collapse:collapse;font-size:14px;margin-top:8px}
+.imp-table th,.imp-table td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+.imp-table th{color:var(--accent);font-weight:normal}
+.imp-wrap{overflow-x:auto}
+.check-l{display:flex;flex-direction:row;gap:10px;align-items:center;margin-top:14px;cursor:pointer;font-size:15px;color:var(--text)}
+.check-l input{width:18px;height:18px;padding:0;accent-color:var(--accent)}
 
 @media (max-width:760px){
   .tb-in{padding:10px 16px;gap:10px}
@@ -303,6 +314,8 @@ details summary{cursor:pointer;color:var(--muted);margin-top:10px}
 <div class="toast" id="toast"></div>
 <input type="file" id="fileIn" accept="image/*" hidden>
 <input type="file" id="jsonIn" accept="application/json,.json" hidden>
+<input type="file" id="xlsIn" accept=".xlsx,.xls,.xlsm,.ods,.csv" hidden>
+<div class="bgtask" id="bgTask" hidden></div>
 
 <script>
 /* ================= Utilidades ================= */
@@ -367,6 +380,12 @@ const FORMAT={
 };
 const DISPLAY={spine:{l:'Lomo',i:'spine'},cover:{l:'Portada',i:'cover'},flat:{l:'Apilado',i:'stack'}};
 const isPhysical=b=>b.format==='fisico'||b.format==='ambos';
+const GENRES=['Fantasía','Romántica','Romantasy','Ciencia ficción','Distopía','Thriller','Misterio','Policiaca','Terror','Histórica','Contemporánea','Clásico','Juvenil','Infantil','Poesía','Teatro','Ensayo','Biografía','Autoayuda','Cómic','Manga','Humor','Viajes','Cocina'];
+const genresOf=s=>String(s||'').split(/\s*[,;]\s*/).map(x=>x.trim()).filter(Boolean);
+function allGenres(){const seen=new Set(),out=[];for(const g of [...GENRES,...state.books.flatMap(b=>genresOf(b.genre))]){const k=norm(g);if(!seen.has(k)){seen.add(k);out.push(g)}}return out}
+// categorías de Google Books (en inglés) → géneros en español
+const GCAT={'fiction':'','juvenile fiction':'Juvenil','young adult fiction':'Juvenil','juvenile nonfiction':'Juvenil','fantasy':'Fantasía','science fiction':'Ciencia ficción','dystopian':'Distopía','romance':'Romántica','thrillers':'Thriller','suspense':'Thriller','mystery & detective':'Misterio','mystery':'Misterio','crime':'Policiaca','horror':'Terror','historical':'Histórica','history':'Histórica','classics':'Clásico','literary':'Contemporánea','poetry':'Poesía','drama':'Teatro','biography & autobiography':'Biografía','self-help':'Autoayuda','comics & graphic novels':'Cómic','manga':'Manga','humor':'Humor','travel':'Viajes','cooking':'Cocina','literary criticism':'Ensayo','philosophy':'Ensayo'};
+function mapCats(cats){const out=[];for(const c of cats||[])for(const p of String(c).split('/')){const g=GCAT[p.trim().toLowerCase()];if(g&&!out.includes(g))out.push(g)}return out.join(', ')}
 
 const THEMES={
   ravenclaw:{name:'Ravenclaw',bg:'#0a1230',surface:'#121d45',surface2:'#1b2a5e',primary:'#2449b0',accent:'#d4af37',text:'#f4eedb',muted:'#9fa9cf',wall:'#0c1636'},
@@ -393,7 +412,7 @@ function defaultState(){
   const s=[{id:uid(),name:'Mis favoritos'},{id:uid(),name:'Fantasía y aventura'},{id:uid(),name:'Por leer'}];
   return {version:1,books:[],shelves:s,settings:{title:'Mi Biblioteca',theme:'ravenclaw',custom:null,wood:'nogal',defaultDisplay:'spine'}};
 }
-const ui={view:'shelf',status:'all',fmt:'all',q:'',sort:'title',results:[]};
+const ui={view:'shelf',status:'all',fmt:'all',genre:'',q:'',sort:'title',results:[]};
 const byId=id=>state.books.find(b=>b.id===id);
 const booksOn=sid=>state.books.filter(b=>b.shelfId===sid).sort((a,b)=>(a.pos??0)-(b.pos??0));
 
@@ -441,6 +460,7 @@ function matches(b){
   if(ui.fmt==='fisico'&&!isPhysical(b))return false;
   if(ui.fmt==='digital'&&!['ebook','audio','ambos'].includes(b.format))return false;
   if(ui.fmt==='nofisico'&&isPhysical(b))return false;
+  if(ui.genre&&!genresOf(b.genre).some(g=>norm(g)===norm(ui.genre)))return false;
   if(ui.q){const q=norm(ui.q);if(!norm([b.title,b.author,b.isbn,b.genre,b.publisher].join(' ')).includes(q))return false}
   return true;
 }
@@ -484,6 +504,8 @@ function renderChrome(){
   $('#filters').innerHTML=chips.map(([k,l,c])=>`<button class="chip ${ui.status===k?'on':''}" data-act="filter" data-s="${k}">${c?`<i class="dot" style="background:${c}"></i>`:''}${l} <span class="n">${cnt[k]}</span></button>`).join('')+
    `<select id="fmtSel" title="Formato"><option value="all">Todos los formatos</option><option value="fisico">Solo físicos</option><option value="digital">Con versión digital</option><option value="nofisico">Sin ejemplar físico</option></select>`;
   $('#fmtSel').value=ui.fmt;
+  const used=[...new Set(B.flatMap(b=>genresOf(b.genre)))].sort((a,b)=>a.localeCompare(b,'es'));
+  if(used.length)$('#filters').insertAdjacentHTML('beforeend',`<select id="genSel" title="Género"><option value="">Todos los géneros</option>${used.map(g=>`<option ${norm(g)===norm(ui.genre)?'selected':''}>${esc(g)}</option>`).join('')}</select>`);
 }
 function render(){
   renderChrome();
@@ -568,7 +590,7 @@ let toastT;function toast(t){const el=$('#toast');el.textContent=t;el.classList.
 function openDetail(id){
   const b=byId(id);if(!b)return;
   const p=num(b.price),pd=num(b.paid);const diff=p!=null&&pd!=null?p-pd:null;
-  const meta=[['ISBN',b.isbn],['Editorial',b.publisher],['Año',b.year],['Páginas',b.pages],['Género',b.genre],['Empezado',fmtDate(b.startDate)],['Terminado',fmtDate(b.endDate)],['Añadido',b.added?fmtDate(b.added.slice(0,10)):'']].filter(x=>x[1]);
+  const meta=[['ISBN',b.isbn],['Editorial',b.publisher],['Edición',b.edition],['Año',b.year],['Páginas',b.pages],['Género',b.genre],['Empezado',fmtDate(b.startDate)],['Terminado',fmtDate(b.endDate)],['Añadido',b.added?fmtDate(b.added.slice(0,10)):'']].filter(x=>x[1]);
   openModal(`<div data-book="${b.id}">
   <button class="btn icon-btn x" data-act="close" title="Cerrar">${ic('x')}</button>
   <div class="detail">
@@ -601,7 +623,7 @@ function openDetail(id){
 
 /* ---------- Editor ---------- */
 let draft=null,fileTarget=null;
-function blankBook(shelfId){return{id:null,title:'',author:'',isbn:'',publisher:'',year:'',pages:'',genre:'',format:'fisico',status:'pendiente',currentPage:'',startDate:'',endDate:'',price:'',paid:'',rating:0,review:'',synopsis:'',cover:'',spineImg:'',spineColor:'',shelfId:shelfId||state.shelves[0].id,display:state.settings.defaultDisplay||'spine'}}
+function blankBook(shelfId){return{id:null,title:'',author:'',isbn:'',publisher:'',edition:'',year:'',pages:'',genre:'',format:'fisico',status:'pendiente',currentPage:'',startDate:'',endDate:'',price:'',paid:'',rating:0,review:'',synopsis:'',cover:'',spineImg:'',spineColor:'',shelfId:shelfId||state.shelves[0].id,display:state.settings.defaultDisplay||'spine'}}
 function openEditor(id,shelfId){
   const b=id?byId(id):null;
   draft=b?JSON.parse(JSON.stringify(b)):blankBook(shelfId);
@@ -619,6 +641,13 @@ function openEditor(id,shelfId){
 }
 function opt(obj,cur){return Object.entries(obj).map(([k,v])=>`<option value="${k}" ${k===cur?'selected':''}>${v.l||v.name||v}</option>`).join('')}
 function coversHTML(){const d=draft;return d._covers.length>1?`<div class="covers">${d._covers.map((u,i)=>`<img src="${esc(u)}" class="${u===d.cover?'sel':''}" data-act="pick-cover" data-i="${i}" alt="">`).join('')}</div><div class="hint">Otras portadas encontradas</div>`:''}
+function genreChipsHTML(){const mine=genresOf(draft.genre).map(norm);return [...allGenres(),...genresOf(draft.genre)].filter((g,i,a)=>a.findIndex(x=>norm(x)===norm(g))===i).map(g=>`<button class="chip ${mine.includes(norm(g))?'on':''}" data-act="toggle-genre" data-g="${esc(g)}">${esc(g)}</button>`).join('')}
+function toggleGenre(g,forceOn){
+  const list=genresOf(draft.genre),i=list.findIndex(x=>norm(x)===norm(g));
+  if(i>=0){if(!forceOn)list.splice(i,1)}else list.push(g);
+  draft.genre=list.join(', ');const w=$('#genreChips');if(w)w.innerHTML=genreChipsHTML();
+}
+function addGenreFromInput(){const inp=$('#newGenre');const g=(inp?.value||'').trim();if(!g)return;g.split(/\s*[,;]\s*/).filter(Boolean).forEach(x=>toggleGenre(x.charAt(0).toUpperCase()+x.slice(1),true));inp.value='';inp.focus()}
 function spinePreview(){const d=draft;return `<div class="book spine-mode" style="--h:190px;--w:${bookW(d)}px">${spineInner(d)}${fmtBadge(d)}</div>`}
 function refreshImages(){
   if(!draft)return;
@@ -636,7 +665,7 @@ function renderForm(){
        <div class="f-cover">${coverEl(d,'big')}</div>
        <div class="covers-wrap">${coversHTML()}</div>
        <input name="cover" placeholder="Pegar URL de la portada…" value="${esc(d.cover.startsWith('data:')?'':d.cover)}">
-       <div class="row wrap"><button class="btn sm" data-act="upload" data-k="cover">${ic('upload')} Subir foto</button>${d.cover?`<button class="btn sm" data-act="clear-img" data-k="cover">Quitar</button>`:''}</div>
+       <div class="row wrap"><button class="btn sm" data-act="find-cover">${ic('search')} Buscar portada</button><button class="btn sm" data-act="upload" data-k="cover">${ic('upload')} Subir foto</button>${d.cover?`<button class="btn sm" data-act="clear-img" data-k="cover">Quitar</button>`:''}</div>
      </div>
      <div class="f-img-block">
        <div class="d-label">Lomo</div>
@@ -653,10 +682,13 @@ function renderForm(){
        <label>Autor/a<input name="author" value="${esc(d.author)}"></label>
        <label>ISBN<input name="isbn" value="${esc(d.isbn)}"></label>
        <label>Editorial<input name="publisher" value="${esc(d.publisher)}"></label>
+       <label>Edición<input name="edition" placeholder="Tapa dura, bolsillo, coleccionista…" value="${esc(d.edition||'')}"></label>
        <label>Año<input name="year" value="${esc(d.year)}"></label>
        <label>Páginas<input name="pages" type="number" min="0" value="${esc(d.pages)}"></label>
-       <label>Género / etiquetas<input name="genre" value="${esc(d.genre)}"></label>
      </div>
+     <div class="d-label">Género <span class="muted" style="text-transform:none;letter-spacing:0;font-family:inherit">· pulsa para elegir uno o varios</span></div>
+     <div class="seg genres" id="genreChips">${genreChipsHTML()}</div>
+     <div class="row"><input id="newGenre" placeholder="Añadir otro género…" autocomplete="off"><button class="btn sm" data-act="add-genre">${ic('plus')} Añadir</button></div>
      <div class="d-label">Estado</div>
      <div class="seg">${Object.entries(STATUS).map(([k,s])=>`<button class="chip ${d.status===k?'on':''}" data-act="form-status" data-s="${k}"><i class="dot" style="background:${s.c}"></i>${s.l}</button>`).join('')}</div>
      <div class="grid2" style="margin-top:12px">
@@ -689,7 +721,19 @@ function saveDraft(){
   if(isNew){b.id=uid();b.added=new Date().toISOString();b.pos=booksOn(b.shelfId).length;state.books.push(b)}
   else{const i=state.books.findIndex(x=>x.id===b.id);if(state.books[i].shelfId!==b.shelfId)b.pos=booksOn(b.shelfId).length;state.books[i]=b}
   save();closeModal();render();toast(isNew?`«${b.title}» está en tu estantería`:'Cambios guardados');
-  if(!b.spineColor&&b.cover)dominantColor(b.cover).then(c=>{const x=byId(b.id);if(c&&x&&!x.spineColor){x.spineColor=c;save();render()}});
+  // lo que falte (portada, color del lomo, sinopsis…) lo busco yo sola en segundo plano
+  if(!b.cover||!b.spineColor||!b.synopsis)Enrich.add([b.id]);
+}
+// Busca en el editor una portada para lo que haya escrito (ISBN, título, autor)
+async function findCoverForDraft(){
+  const d=draft;if(!d)return;
+  if(!d.isbn&&!d.title.trim()){toast('Escribe primero el título o el ISBN');return}
+  toast('Buscando portada…');
+  const list=await findCovers(d,6);
+  if(draft!==d)return;
+  if(!list.length){toast('No he encontrado portada. Puedes subir una foto.');return}
+  d._covers=list;d.cover=list[0];const ci=$('[name=cover]');if(ci)ci.value=d.cover;
+  refreshImages();autoSpineColor();toast(list.length>1?'Portada encontrada · tienes otras para elegir debajo':'Portada encontrada');
 }
 
 /* ================= Búsqueda online ================= */
@@ -698,7 +742,7 @@ async function searchOnline(q){
   const clean=q.replace(/[-\s]/g,'');const isIsbn=/^(97[89])?\d{9}[\dXx]$/.test(clean);
   const key=(state.settings.gkey||'').trim();
   const gUrl='https://www.googleapis.com/books/v1/volumes?maxResults=15&printType=books&q='+encodeURIComponent(isIsbn?'isbn:'+clean:q)+(key?'&key='+encodeURIComponent(key):'');
-  const oUrl='https://openlibrary.org/search.json?limit=12&lang=es&fields=key,title,author_name,isbn,cover_i,first_publish_year,number_of_pages_median,publisher&'+(isIsbn?'isbn='+clean:'q='+encodeURIComponent(q));
+  const oUrl='https://openlibrary.org/search.json?limit=12&lang=es&fields=key,title,author_name,isbn,cover_i,first_publish_year,number_of_pages_median,publisher,editions,editions.title,editions.isbn,editions.cover_i,editions.publisher,editions.language,editions.publish_date&'+(isIsbn?'isbn='+clean:'q='+encodeURIComponent(q));
   const getJ=u=>fetch(u).then(r=>{if(!r.ok)throw new Error(r.status);return r.json()});
   const [g,o,ed]=await Promise.allSettled([getJ(gUrl),getJ(oUrl),isIsbn?olEdition(clean):Promise.resolve(null)]);
   const out=[];
@@ -711,13 +755,17 @@ async function searchOnline(q){
     const lp=it.saleInfo?.listPrice||it.saleInfo?.retailPrice;
     out.push({src:'Google',title:v.title||'',author:(v.authors||[]).join(', '),publisher:v.publisher||'',year:(v.publishedDate||'').slice(0,4),pages:v.pageCount||'',
       isbn:isIsbn?clean:(i13||i10||''),isbns:[i13,i10].filter(Boolean),synopsis:stripHtml(v.description||''),cover,
-      covers:cover?[cover.replace(/zoom=\d/,'zoom=1')+'&fife=w600',cover]:[],price:lp&&lp.currencyCode==='EUR'?lp.amount:'',genre:(v.categories||[]).join(', ')});
+      covers:cover?[cover.replace(/zoom=\d/,'zoom=1')+'&fife=w600',cover]:[],price:lp&&lp.currencyCode==='EUR'?lp.amount:'',genre:mapCats(v.categories)});
   }
   if(o.status==='fulfilled')for(const d of o.value.docs||[]){
-    const isbns=(d.isbn||[]);const i13=isIsbn?clean:(isbns.find(x=>x.length===13)||isbns[0]||'');
-    out.push({src:'Open Library',title:d.title||'',author:(d.author_name||[]).join(', '),publisher:(d.publisher||[])[0]||'',year:d.first_publish_year||'',pages:d.number_of_pages_median||'',
-      isbn:i13,isbns:i13?[i13]:[],synopsis:'',cover:d.cover_i?`https://covers.openlibrary.org/b/id/${d.cover_i}-M.jpg`:'',
-      covers:d.cover_i?[`https://covers.openlibrary.org/b/id/${d.cover_i}-L.jpg`]:[],olKey:d.key});
+    // con lang=es, Open Library trae primero la edición en español (título, portada y editorial de esa edición)
+    const e=d.editions?.docs?.[0],es=e&&(e.language||[]).includes('spa');
+    const isbns=es?(e.isbn||[]):(d.isbn||[]);const i13=isIsbn?clean:(isbns.find(x=>x.length===13)||isbns[0]||'');
+    const cv=[es&&e.cover_i,d.cover_i].filter(Boolean);
+    out.push({src:es?'Open Library · en español':'Open Library',title:(es&&e.title)||d.title||'',author:(d.author_name||[]).join(', '),publisher:(es&&e.publisher?.[0])||(d.publisher||[])[0]||'',
+      year:(es&&(String(e.publish_date||'').match(/\d{4}/)||[])[0])||d.first_publish_year||'',pages:d.number_of_pages_median||'',
+      isbn:i13,isbns:i13?[i13]:[],synopsis:'',cover:cv[0]?`https://covers.openlibrary.org/b/id/${cv[0]}-M.jpg`:'',
+      covers:[...new Set(cv)].map(c=>`https://covers.openlibrary.org/b/id/${c}-L.jpg`),olKey:d.key});
   }
   if(g.status==='rejected'&&o.status==='rejected'&&!out.length)throw new Error('sin conexión');
   if(isIsbn&&out[0]&&!out[0].author)out[0].author=out.find(r=>r.author)?.author||'';
@@ -745,17 +793,120 @@ async function onlineSearch(){
       :'<div class="hint">No he encontrado nada. Prueba con el ISBN (está en la contraportada) o con otras palabras.</div>');
   }catch(e){box.innerHTML='<div class="hint">No he podido conectar con internet. Puedes rellenar los datos a mano.</div>'}
 }
-const testImg=u=>new Promise(r=>{const i=new Image();i.onload=()=>r(i.naturalWidth>20&&i.naturalHeight>20);i.onerror=()=>r(false);i.src=u});
+const testImg=u=>new Promise(r=>{const i=new Image();const t=setTimeout(()=>r(false),12000);i.onload=()=>{clearTimeout(t);r(i.naturalWidth>20&&i.naturalHeight>20)};i.onerror=()=>{clearTimeout(t);r(false)};i.src=u});
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const cleanIsbn=s=>String(s||'').replace(/[^\dXx]/g,'').toUpperCase();
+// ISBN-13 (978…) → ISBN-10, que es como Amazon guarda las portadas
+function isbn10(i){if(/^\d{9}[\dX]$/.test(i))return i;if(!/^978\d{10}$/.test(i))return null;const c=i.slice(3,12);let s=0;for(let k=0;k<9;k++)s+=(10-k)*+c[k];const d=(11-s%11)%11;return c+(d===10?'X':d)}
+const tclean=s=>norm(s).replace(/\(.*?\)|\[.*?\]/g,'').replace(/[^a-z0-9 ]/g,'').replace(/\s+/g,' ').trim();
+// ¿el título encontrado es el mismo libro? (no un pack, ni otro de la saga)
+function sameTitle(found,wanted){
+  const f=tclean(found),w=tclean(wanted);if(!f||!w)return false;
+  if(/\b(pack|estuche|trilogia|box set)\b/.test(f)&&!/\b(pack|estuche|trilogia)\b/.test(w))return false;
+  return f===w||((f.startsWith(w)||w.startsWith(f))&&Math.max(f.length,w.length)/Math.min(f.length,w.length)<=2);
+}
+// Portadas para un libro (por ISBN y por título + autor), de varias fuentes, solo las que existen de verdad
+async function findCovers(b,max=4){
+  const isbn=cleanIsbn(b.isbn),title=(b.title||'').trim(),author=(b.author||'').split(',')[0].trim();
+  const key=(state.settings.gkey||'').trim(),getJ=u=>fetch(u).then(r=>r.ok?r.json():null).catch(()=>null);
+  const gUrl=q=>'https://www.googleapis.com/books/v1/volumes?maxResults=6&printType=books&q='+encodeURIComponent(q)+(key?'&key='+encodeURIComponent(key):'');
+  const gCov=(j,chk)=>(j?.items||[]).filter(it=>!chk||sameTitle(it.volumeInfo?.title,title)).map(it=>(it.volumeInfo?.imageLinks?.thumbnail||'').replace('http://','https://').replace('&edge=curl','')).filter(Boolean).map(c=>c.replace(/zoom=\d/,'zoom=1')+'&fife=w600');
+  const oCov=j=>(j?.docs||[]).flatMap(d=>{const e=d.editions?.docs?.[0];return [e&&sameTitle(e.title,title)&&e.cover_i,sameTitle(d.title,title)&&d.cover_i]}).filter(Boolean).map(c=>`https://covers.openlibrary.org/b/id/${c}-L.jpg`);
+  const jobs=[];
+  const i10=isbn10(isbn);
+  if(isbn){jobs.push(Promise.resolve([`https://covers.openlibrary.org/b/isbn/${isbn}-L.jpg?default=false`,...(i10?[`https://images-na.ssl-images-amazon.com/images/P/${i10}.01.LZZZZZZZ.jpg`]:[])]));jobs.push(getJ(gUrl('isbn:'+isbn)).then(gCov))}
+  if(title){
+    jobs.push(getJ(gUrl('intitle:'+title+(author?' inauthor:'+author:''))).then(j=>gCov(j,true)));
+    jobs.push(getJ('https://openlibrary.org/search.json?limit=6&lang=es&fields=title,cover_i,editions,editions.title,editions.cover_i&title='+encodeURIComponent(title)+(author?'&author='+encodeURIComponent(author):'')).then(oCov));
+  }
+  const list=[...new Set((await Promise.all(jobs)).flat())].slice(0,14);
+  const ok=await Promise.all(list.map(testImg));
+  return list.filter((u,i)=>ok[i]).slice(0,max);
+}
+// Elige, entre los resultados de búsqueda, el que de verdad es ese libro
+function pickBest(res,b){
+  if(!res.length)return null;
+  const isbn=cleanIsbn(b.isbn);
+  const t=tclean(b.title),a=norm((b.author||'').split(',')[0]).split(/\s+/).filter(w=>w.length>2);
+  // por ISBN, pero comprobando que se parece (a veces el ISBN apuntado es el de otro libro)
+  if(isbn){const m=res.find(r=>(r.isbns||[]).some(i=>cleanIsbn(i)===isbn)||cleanIsbn(r.isbn)===isbn);
+    if(m){const rt=norm(m.title).replace(/[^a-z0-9 ]/g,''),ra=norm(m.author);
+      const tw=t.split(' ').filter(w=>w.length>3);
+      if(!t||!tw.length||tw.some(w=>rt.includes(w))||a.some(w=>ra.includes(w)))return m}}
+  if(!t)return isbn?res[0]:null;
+  let best=null,bs=0;
+  for(const r of res){
+    const rt=tclean(r.title);if(!rt)continue;
+    // «Pack X / Y», «Trilogía…»: si el título encontrado es mucho más largo, es otro libro
+    if(/\b(pack|estuche|trilogia|saga completa|box set|coleccion)\b/.test(rt)&&!/\b(pack|estuche|trilogia|coleccion)\b/.test(t))continue;
+    const ratio=Math.max(rt.length,t.length)/Math.max(1,Math.min(rt.length,t.length));
+    let s=rt===t?3:((rt.startsWith(t)||t.startsWith(rt))&&ratio<=2)?2:((rt.includes(t)||t.includes(rt))&&ratio<=1.5)?1:0;
+    if(!s)continue;
+    if(a.length){const ra=norm(r.author);if(a.some(w=>ra.includes(w)))s+=2;else if(r.author)s-=1}
+    if(r.cover)s+=.5;if(r.synopsis)s+=.3;
+    if(s>bs){bs=s;best=r}
+  }
+  return bs>=1.5?best:null;
+}
+// Completa un libro guardado con lo que falte: portada, color del lomo, sinopsis, páginas…
+async function enrichBook(id){
+  let b=byId(id);if(!b)return;
+  const isbn=cleanIsbn(b.isbn),q1=isbn||`${b.title} ${(b.author||'').split(',')[0]}`.trim();
+  let res=[];try{res=await searchOnline(q1)}catch(e){}
+  let r=pickBest(res,b);
+  const isbnBad=isbn&&res.length&&!r; // ese ISBN es de otro libro: no lo uso para la portada
+  if(!r&&isbn&&b.title){try{res=await searchOnline(`${b.title} ${(b.author||'').split(',')[0]}`.trim());r=pickBest(res,{...b,isbn:''})}catch(e){}}
+  b=byId(id);if(!b)return;
+  if(r){
+    // el ISBN solo si el resultado es de verdad su edición (buscada por ISBN); si no, podría ser el de otra edición
+    for(const k of ['author','publisher','year','pages','genre','synopsis'])if(!String(b[k]??'').trim()&&r[k])b[k]=String(r[k]);
+    if(num(b.price)==null&&num(r.price)!=null)b.price=num(r.price);
+  }
+  if(!b.cover){
+    const list=[...new Set([...(r?.covers||[]),...(r?.isbns||[]).map(i=>`https://covers.openlibrary.org/b/isbn/${i}-L.jpg?default=false`)])].slice(0,6);
+    const ok=await Promise.all(list.map(testImg));
+    let c=list.find((u,i)=>ok[i]);
+    if(!c)c=(await findCovers(isbnBad?{...b,isbn:''}:b,1))[0];
+    b=byId(id);if(b&&c&&!b.cover)b.cover=c;
+  }
+  if(b&&!b.synopsis&&r?.olKey){try{const w=await fetch(`https://openlibrary.org${r.olKey}.json`).then(x=>x.json());const desc=typeof w.description==='string'?w.description:w.description?.value;b=byId(id);if(b&&desc&&!b.synopsis)b.synopsis=desc}catch(e){}}
+  b=byId(id);
+  if(b&&b.cover&&!b.spineColor){const c=await dominantColor(b.cover);b=byId(id);if(b&&c&&!b.spineColor)b.spineColor=c}
+  if(b){save();if(!draft)render()}
+}
+// Cola en segundo plano (para los libros importados o guardados sin portada)
+const Enrich={q:[],running:false,done:0,
+  add(ids){for(const id of ids)if(!this.q.includes(id))this.q.push(id);this.run()},
+  async run(){
+    if(this.running)return;this.running=true;
+    while(this.q.length){
+      const id=this.q[0];this.paint();
+      if(!(draft&&draft.id===id)){try{await enrichBook(id)}catch(e){}}
+      this.q.shift();this.done++;await sleep(350);
+    }
+    this.running=false;const n=this.done;this.done=0;this.paint();
+    if(n>1){render();toast(`Listo: he completado ${n} libros`)}
+  },
+  paint(){
+    const el=$('#bgTask');if(!el)return;
+    const total=this.done+this.q.length;
+    if(!this.running||total<2){el.hidden=true;return}
+    el.hidden=false;el.innerHTML=`${ic('search')}<span>Buscando portadas y datos… ${this.done+1} de ${total}</span>`;
+  },
+};
 function applyResult(r){
   const d=draft;if(!d)return;
-  for(const k of ['title','author','isbn','publisher','year','pages','genre','synopsis'])if(r[k])d[k]=String(r[k]);
+  for(const k of ['title','author','isbn','publisher','year','pages','synopsis'])if(r[k])d[k]=String(r[k]);
+  if(r.genre&&!d.genre)d.genre=r.genre;
   if(r.price&&!num(d.price))d.price=String(r.price);
   const list=[...new Set([...(r.covers||[]),...(r.isbns||[]).map(i=>`https://covers.openlibrary.org/b/isbn/${i}-L.jpg?default=false`)])];
   d._covers=[];renderForm();
   $('#oresults').innerHTML=`<div class="hint ok">✓ Datos de «${esc(r.title)}» cargados. Revísalos y pulsa Guardar.</div>`;
-  Promise.all(list.map(testImg)).then(ok=>{
+  Promise.all(list.map(testImg)).then(async ok=>{
     if(draft!==d)return;
     d._covers=list.filter((u,i)=>ok[i]);
+    // si esa edición no trae portada, la busco en otras fuentes
+    if(!d._covers.length){d._covers=await findCovers(d,6);if(draft!==d)return}
     if(d._covers.length){d.cover=d._covers[0];const ci=$('[name=cover]');if(ci)ci.value=d.cover}
     refreshImages();autoSpineColor();
   });
@@ -794,6 +945,145 @@ function fileToDataURL(file,max=800){
     res(c.toDataURL('image/jpeg',.86))};img.onerror=rej;img.src=fr.result};fr.onerror=rej;fr.readAsDataURL(file)});
 }
 
+/* ================= Importar desde Excel ================= */
+let imp=null;
+const loadScript=src=>new Promise((res,rej)=>{if([...document.scripts].some(s=>s.src===src))return res();const s=document.createElement('script');s.src=src;s.onload=res;s.onerror=()=>rej(new Error('sin conexión'));document.head.appendChild(s)});
+const IMP_FIELDS=[['title','Título *'],['author','Autor/a'],['isbn','ISBN'],['publisher','Editorial'],['edition','Edición (tapa dura, bolsillo…)'],['year','Año'],['pages','Páginas'],['genre','Género'],['price','Precio de venta (PVP)'],['paid','Lo que pagué'],['status','Estado / ¿leído?'],['format','Formato (físico, ebook…)'],['rating','Valoración / nota'],['review','Mi opinión'],['synopsis','Sinopsis'],['startDate','Fecha empezado'],['endDate','Fecha terminado'],['currentPage','Página actual'],['shelf','Estante']];
+// orden de prioridad al adivinar qué es cada columna
+const IMP_GUESS=[['currentPage',/pagina actual|voy por/],['paid',/pagad|pague|me costo|coste|costo|precio de compra|precio pagado/],['startDate',/empez|inicio|comienzo|empece/],['endDate',/terminad|fin de lectura|acabad|termine|fecha de lectura|leido el/],
+  ['author',/autor|author|escritor/],['title',/^(titulo|title|libro|nombre)|titulo/],['isbn',/isbn|ean/],['publisher',/editorial|publisher|sello/],['edition',/edicion|encuadernacion|tapa/],['genre',/genero|genre|categoria|tematica/],
+  ['synopsis',/sinopsis|resumen|argumento/],['review',/opinion|comentario|resena|review|notas personales/],['rating',/valoracion|puntuacion|estrellas|rating|^nota$|calificacion/],['price',/precio|pvp|price/],
+  ['status',/estado|leido|status|^leer/],['format',/formato|format|soporte|tipo|fisico|digital/],['shelf',/estante|estanteria|balda|ubicacion|coleccion/],['year',/^ano|year|ano de publicacion|publicacion/],['pages',/pagina|pags|pages/]];
+async function readSpreadsheet(file){
+  toast('Leyendo el archivo…');
+  try{await loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js')}catch(e){toast('Necesito internet para leer el Excel');return}
+  let wb;try{wb=/\.(csv|txt|tsv)$/i.test(file.name)?XLSX.read(await file.text(),{type:'string',cellDates:true}):XLSX.read(await file.arrayBuffer(),{cellDates:true})}catch(e){toast('No he podido abrir ese archivo');return}
+  // la primera hoja que tenga datos
+  let rows=[],sheet='';
+  for(const n of wb.SheetNames){const r=XLSX.utils.sheet_to_json(wb.Sheets[n],{header:1,raw:true,defval:''}).filter(x=>x.some(c=>String(c).trim()!==''));if(r.length>1){rows=r;sheet=n;break}}
+  if(!rows.length){toast('El archivo está vacío');return}
+  // fila de cabecera: la primera (de las 10 primeras) donde reconozco algún nombre de columna
+  let hi=rows.slice(0,10).findIndex(r=>r.some(c=>typeof c==='string'&&IMP_GUESS.some(([,re])=>re.test(norm(c).trim()))));if(hi<0)hi=0;
+  const width=Math.max(...rows.map(r=>r.length));
+  const header=Array.from({length:width},(_,i)=>String(rows[hi][i]??'').trim());
+  const data=rows.slice(hi+1);
+  const map={};
+  header.forEach((h,i)=>{const n=norm(h).trim();if(!n)return;for(const [k,re] of IMP_GUESS)if(map[k]==null&&re.test(n)){map[k]=i;break}});
+  if(map.title==null)map.title=header.findIndex((h,i)=>!Object.values(map).includes(i));
+  imp={file:file.name,sheet,header,data,map};
+  openImport();
+}
+const colLetter=i=>{let s='';i++;while(i>0){const m=(i-1)%26;s=String.fromCharCode(65+m)+s;i=Math.floor((i-1)/26)}return s};
+function openImport(){
+  const sample=i=>{const v=imp.data.find(r=>String(r[i]??'').trim()!=='')?.[i];return v==null?'':' · ej.: '+String(v instanceof Date?v.toLocaleDateString('es-ES'):v).slice(0,24)};
+  const colOpts=cur=>`<option value="">— No importar —</option>`+imp.header.map((h,i)=>`<option value="${i}" ${cur===i?'selected':''}>${esc((h||'Columna '+colLetter(i))+sample(i))}</option>`).join('');
+  openModal(`<button class="btn icon-btn x" data-act="close" title="Cerrar">${ic('x')}</button>
+  <h2 class="m-title">Importar desde Excel</h2>
+  <p class="hint" style="margin-top:0">«${esc(imp.file)}»${imp.sheet?' · hoja «'+esc(imp.sheet)+'»':''} · ${imp.data.length} filas. He adivinado qué es cada columna; corrige lo que no esté bien.</p>
+  <div class="grid2">${IMP_FIELDS.map(([k,l])=>`<label>${l}<select data-imp="${k}">${colOpts(imp.map[k])}</select></label>`).join('')}</div>
+  <div class="d-label">Para los que no lo indiquen</div>
+  <div class="grid2">
+    <label>¿Cómo los tengo?<select id="impFmt">${opt(FORMAT,'fisico')}</select></label>
+    <label>Estado<select id="impSt">${opt(STATUS,'pendiente')}</select></label>
+    <label>Ponerlos en el estante<select id="impShelf">${state.shelves.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join('')}<option value="__new">Nuevo estante «Del Excel»</option></select></label>
+  </div>
+  <label class="check-l"><input type="checkbox" id="impEnrich" checked> Buscar en internet portada, sinopsis, páginas y lo que falte</label>
+  <div id="impPrev"></div>
+  <div class="m-actions"><button class="btn" data-act="close">Cancelar</button><button class="btn gold" data-act="do-import" id="impGo">${ic('check')} Importar</button></div>`,'wide');
+  renderImpPreview();
+}
+const cellStr=v=>v==null?'':v instanceof Date?v.toISOString().slice(0,10):String(v).trim();
+function impMoney(v){if(typeof v==='number')return Math.round(v*100)/100;let s=cellStr(v).replace(/[€\s]|eur/gi,'');if(!s)return null;if(s.includes(','))s=s.replace(/\./g,'').replace(',','.');const x=parseFloat(s);return isNaN(x)?null:x}
+function impDate(v){
+  if(v instanceof Date)return new Date(v.getTime()+12*36e5).toISOString().slice(0,10);
+  if(typeof v==='number'&&v>20000&&v<80000)return new Date(Math.round((v-25569)*864e5)).toISOString().slice(0,10);
+  const s=cellStr(v);let m=s.match(/^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{2,4})$/);
+  if(m){const y=m[3].length===2?'20'+m[3]:m[3];return `${y}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`}
+  m=s.match(/^\d{4}-\d{2}-\d{2}/);return m?m[0]:'';
+}
+function impStatus(v){
+  if(v===true)return 'leido';if(v===false)return 'pendiente';
+  const n=norm(cellStr(v)).trim();if(!n)return null;
+  if(/desterr|abandon|dejad|no me gust|dnf/.test(n))return 'desterrado';
+  if(/leyendo|empezad|en curso|actual|a medias/.test(n))return 'leyendo';
+  if(/pendiente|por leer|no leido|sin leer|^no$|tbr|quiero leer/.test(n))return 'pendiente';
+  if(/^(si|x|✓|✔|ok|yes|true|1)$|leido|terminad|acabad/.test(n))return 'leido';
+  return null;
+}
+function impFormat(v){
+  const n=norm(cellStr(v)).trim();if(!n)return null;
+  if(/ambos|los dos|fisico y|y digital|\+/.test(n))return 'ambos';
+  if(/audio/.test(n))return 'audio';
+  if(/desead|wish|no lo tengo|quiero|comprar/.test(n))return 'deseado';
+  if(/ebook|e-book|digital|kindle|epub|pdf|electron|kobo/.test(n))return 'ebook';
+  if(/fisico|papel|tapa|bolsillo|^si$|^x$/.test(n))return 'fisico';
+  return null;
+}
+function impRating(v){
+  let x=typeof v==='number'?v:null;const s=cellStr(v);
+  if(x==null){const st=(s.match(/★/g)||[]).length;if(st)x=st+(/½/.test(s)?.5:0);else{const m=s.replace(',','.').match(/(\d+(?:\.\d+)?)(?:\s*\/\s*(\d+))?/);if(m)x=m[2]?parseFloat(m[1])/parseFloat(m[2])*5:parseFloat(m[1])}}
+  if(x==null||isNaN(x)||x<=0)return 0;if(x>5&&x<=10)x=x/2;return Math.max(0,Math.min(5,Math.round(x*2)/2));
+}
+function impBooks(){
+  const M=imp.map,get=(r,k)=>M[k]==null?'':r[M[k]];
+  const defFmt=$('#impFmt')?.value||'fisico',defSt=$('#impSt')?.value||'pendiente';
+  // repetido = mismo título y autor (no me fío solo del ISBN: en las hojas a veces se copia el de otro libro)
+  const key=(t,a)=>norm(t).replace(/[^a-z0-9]/g,'')+'|'+norm(String(a||'').split(',')[0]).replace(/[^a-z0-9]/g,'');
+  const seen=new Set(state.books.map(b=>key(b.title,b.author)));
+  const out=[];let dup=0,empty=0;
+  for(const r of imp.data){
+    const title=cellStr(get(r,'title'));if(!title){empty++;continue}
+    const iv=get(r,'isbn');let isbn=typeof iv==='number'?String(Math.round(iv)):cleanIsbn(iv);
+    if(typeof iv==='number'&&isbn.length===9)isbn='0'+isbn; // Excel se come el 0 inicial de algunos ISBN-10
+    if(isbn.length!==10&&isbn.length!==13)isbn=''; // «[No encontrado]», «Ver nota», números de más…
+    const author=cellStr(get(r,'author'));
+    const k=key(title,author);
+    if(seen.has(k)){dup++;continue}
+    seen.add(k);
+    const yv=get(r,'year'),pv=get(r,'pages');
+    const b={title,author,isbn,
+      publisher:cellStr(get(r,'publisher')),
+      year:yv instanceof Date?String(yv.getFullYear()):(cellStr(yv).match(/\d{4}/)||[''])[0],
+      pages:typeof pv==='number'?String(Math.round(pv)):(cellStr(pv).match(/\d+/)||[''])[0],
+      genre:[...new Map(genresOf(cellStr(get(r,'genre')).replace(/\s*[\/:]\s*/g,', ')).map(g=>g.replace(/\s*\(.*?\)\s*/g,'').trim()).filter(Boolean).map(g=>[norm(g),g.charAt(0).toUpperCase()+g.slice(1)])).values()].join(', '),
+      edition:cellStr(get(r,'edition')),
+      price:impMoney(get(r,'price')),paid:impMoney(get(r,'paid')),
+      status:impStatus(get(r,'status'))||defSt,format:impFormat(get(r,'format'))||defFmt,
+      rating:impRating(get(r,'rating')),review:cellStr(get(r,'review')),synopsis:cellStr(get(r,'synopsis')),
+      startDate:impDate(get(r,'startDate')),endDate:impDate(get(r,'endDate')),
+      currentPage:(cellStr(get(r,'currentPage')).match(/\d+/)||[''])[0],
+      _shelf:cellStr(get(r,'shelf'))};
+    out.push(b);
+  }
+  return {books:out,dup,empty};
+}
+function renderImpPreview(){
+  const el=$('#impPrev');if(!el||!imp)return;
+  if(imp.map.title==null||imp.map.title<0){el.innerHTML='<p class="hint" style="color:#ff9a9a">Elige qué columna tiene el título.</p>';$('#impGo').disabled=true;return}
+  const {books,dup,empty}=impBooks();$('#impGo').disabled=!books.length;
+  $('#impGo').innerHTML=`${ic('check')} Importar ${books.length} ${books.length===1?'libro':'libros'}`;
+  el.innerHTML=`<div class="d-label">Vista previa</div>
+   <p class="hint">${books.length} libros nuevos${dup?` · ${dup} ya estaban en tu biblioteca (no los repito)`:''}${empty?` · ${empty} filas sin título (las salto)`:''}</p>
+   <div class="imp-wrap"><table class="imp-table"><tr><th>Título</th><th>Autor/a</th><th>ISBN</th><th>Estado</th><th>Tengo</th><th>PVP</th><th>Pagué</th></tr>
+   ${books.slice(0,6).map(b=>`<tr><td>${esc(b.title)}</td><td>${esc(b.author)}</td><td>${esc(b.isbn)}</td><td>${STATUS[b.status].l}</td><td>${FORMAT[b.format].l.replace(/ \(.*\)/,'')}</td><td>${b.price!=null?eur(b.price):''}</td><td>${b.paid!=null?eur(b.paid):''}</td></tr>`).join('')}</table></div>
+   ${books.length>6?`<p class="hint">…y ${books.length-6} más</p>`:''}`;
+}
+function doImport(){
+  const {books}=impBooks();if(!books.length)return;
+  let defShelf=$('#impShelf').value;
+  if(defShelf==='__new'){const s={id:uid(),name:'Del Excel'};state.shelves.push(s);defShelf=s.id}
+  const enrich=$('#impEnrich').checked,ids=[],now=Date.now();
+  books.forEach((x,i)=>{
+    const {_shelf,...data}=x;let sid=defShelf;
+    if(_shelf){let sh=state.shelves.find(s=>norm(s.name)===norm(_shelf));if(!sh){sh={id:uid(),name:_shelf};state.shelves.push(sh)}sid=sh.id}
+    const b={...blankBook(sid),...data,id:uid(),shelfId:sid,added:new Date(now-i).toISOString(),pos:booksOn(sid).length};
+    state.books.push(b);ids.push(b.id);
+  });
+  imp=null;save();closeModal();render();
+  toast(`${ids.length} libros añadidos${enrich?' · ahora busco sus portadas':''}`);
+  if(enrich)Enrich.add(ids);
+}
+
 /* ================= Ajustes ================= */
 function openSettings(){
   const s=state.settings,cur=currentColors();
@@ -824,6 +1114,9 @@ function openSettings(){
   <div class="d-label">Clave de Google Books (opcional)</div>
   <input id="setGkey" placeholder="Pega aquí tu clave gratuita de Google Books" value="${esc(s.gkey||'')}" autocomplete="off">
   <p class="hint">Sin clave la búsqueda usa Open Library y el cupo compartido de Google, que a veces se agota. Puedes crear una clave gratis en <a href="https://console.cloud.google.com/apis/library/books.googleapis.com" target="_blank" rel="noopener">Google Cloud</a> (activa «Books API» → Credenciales → Crear clave de API).</p>
+  <div class="d-label">Añadir muchos libros de golpe</div>
+  <div class="row wrap"><button class="btn gold" data-act="import-xls">${ic('upload')} Importar desde Excel</button><button class="btn" data-act="enrich-all">${ic('search')} Buscar portadas y datos que falten</button></div>
+  <p class="hint">Vale un Excel (.xlsx o .xls), una hoja de cálculo de Google descargada o un .csv: una fila por libro, con el título y, si los tienes, autor, ISBN, precio, lo que pagaste, si lo has leído…</p>
   <div class="d-label">Copia de seguridad</div>
   <div class="row wrap"><button class="btn" data-act="export">${ic('download')} Exportar mi biblioteca</button><button class="btn" data-act="import">${ic('upload')} Importar copia</button><button class="btn danger" data-act="wipe">${ic('trash')} Borrar todo</button></div>
   <p class="hint">Tus libros se guardan en este navegador. Exporta una copia de vez en cuando para no perderlos (y para pasarlos a otro ordenador).</p>`,'wide');
@@ -908,6 +1201,14 @@ document.addEventListener('click',async e=>{
     case 'def-display':state.settings.defaultDisplay=a.dataset.d;save();openSettings();break;
     case 'export':{const blob=new Blob([JSON.stringify(state,null,1)],{type:'application/json'});const u=URL.createObjectURL(blob);const l=document.createElement('a');l.href=u;l.download=`mi-biblioteca-${today()}.json`;l.click();setTimeout(()=>URL.revokeObjectURL(u),2000);toast('Copia descargada');break}
     case 'import':$('#jsonIn').value='';$('#jsonIn').click();break;
+    case 'import-xls':$('#xlsIn').value='';$('#xlsIn').click();break;
+    case 'do-import':doImport();break;
+    case 'enrich-all':{const ids=state.books.filter(b=>!b.cover||!b.synopsis||!b.spineColor).map(b=>b.id);
+      if(!ids.length){toast('Todos tus libros tienen ya portada y sinopsis');break}
+      closeModal();toast(`Busco lo que falta en ${ids.length} ${ids.length===1?'libro':'libros'}…`);Enrich.add(ids);break}
+    case 'toggle-genre':toggleGenre(a.dataset.g);break;
+    case 'add-genre':addGenreFromInput();break;
+    case 'find-cover':findCoverForDraft();break;
     case 'cloud-connect':cloudConnect($('#cloudUrl').value,$('#cloudKey').value);break;
     case 'cloud-sync':Cloud.pull(true).then(()=>{if(Cloud.status==='ok')toast('Sincronizado')});break;
     case 'cloud-off':if(confirm('¿Desconectar este dispositivo de la nube? Tus libros siguen aquí y en tu Drive.')){Cloud.cfg=null;Cloud.saveCfg();Cloud.set('off');openSettings()}break;
@@ -952,6 +1253,9 @@ document.addEventListener('change',async e=>{
   const t=e.target;
   if(t.id==='fmtSel'){ui.fmt=t.value;render();return}
   if(t.id==='sortSel'){ui.sort=t.value;render();return}
+  if(t.id==='genSel'){ui.genre=t.value;render();return}
+  if(t.dataset.imp!==undefined||['impFmt','impSt','impShelf'].includes(t.id)){if(t.dataset.imp!==undefined)imp.map[t.dataset.imp]=t.value===''?null:+t.value;renderImpPreview();return}
+  if(t.id==='xlsIn'&&t.files[0]){readSpreadsheet(t.files[0]);return}
   if(t.id==='dShelf'){const id=t.closest('[data-book]').dataset.book;moveBook(id,t.value,null);toast('Cambiado de estante');return}
   if(t.id==='dPage'){const id=t.closest('[data-book]').dataset.book;const b=byId(id);b.currentPage=t.value;save();render();openDetail(id);
     if(num(b.pages)&&num(t.value)>=num(b.pages))toast('¡Lo has terminado! Márcalo como leído ✓');return}
@@ -966,6 +1270,7 @@ document.addEventListener('change',async e=>{
 document.addEventListener('keydown',e=>{
   if(e.key==='Escape'&&$('#modalWrap').classList.contains('open'))closeModal();
   if(e.key==='Enter'&&e.target.id==='oq'){e.preventDefault();onlineSearch()}
+  if(e.key==='Enter'&&e.target.id==='newGenre'){e.preventDefault();addGenreFromInput()}
 });
 let downOnBackdrop=false;
 $('#modalWrap').addEventListener('mousedown',e=>downOnBackdrop=e.target.id==='modalWrap');
