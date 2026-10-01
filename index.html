@@ -7,6 +7,8 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Biblioteca">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 46'%3E%3Cpath d='M20 2 37 8v14c0 11-7.5 18.5-17 22C10.5 40.5 3 33 3 22V8z' fill='%232449b0' stroke='%23d4af37' stroke-width='3'/%3E%3Cpath d='M10 17c3.5-1.2 7-1 10 1.2 3-2.2 6.5-2.4 10-1.2v13c-3.5-1.2-7-1-10 1.2-3-2.2-6.5-2.4-10-1.2z' fill='none' stroke='%23d4af37' stroke-width='2'/%3E%3C/svg%3E">
 <title>Mi Biblioteca</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -63,6 +65,10 @@ input[type=color]{padding:2px;width:42px;height:32px;cursor:pointer}
 .btn.sm{padding:5px 11px;font-size:15px}
 .icon-btn{width:38px;height:38px;padding:0;justify-content:center;border-radius:50%}
 .icon-btn.sm{width:32px;height:32px}
+.cloud-ok{color:var(--accent)}
+.cloud-busy{color:var(--muted);animation:pulse 1.2s ease-in-out infinite}
+.cloud-err{color:#ff9a9a;border-color:#ff9a9a88}
+@keyframes pulse{50%{opacity:.4}}
 .filters{max-width:1400px;margin:auto;padding:0 20px 12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .filters select{width:auto;border-radius:999px;padding:4px 12px;font-size:15px;background:var(--surface)}
 .chip{border:1px solid var(--line);background:transparent;padding:4px 12px;border-radius:999px;font-size:15px;color:var(--muted);display:inline-flex;gap:6px;align-items:center}
@@ -287,6 +293,7 @@ details summary{cursor:pointer;color:var(--muted);margin-top:10px}
     <div class="spacer"></div>
     <div class="search"><svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg><input id="q" type="search" placeholder="Buscar en mi biblioteca…" autocomplete="off"></div>
     <button class="btn gold" data-act="add-book" id="addBtn"></button>
+    <button class="btn icon-btn" data-act="settings" id="cloudBtn" hidden></button>
     <button class="btn icon-btn" data-act="settings" title="Personalizar" id="setBtn"></button>
   </div>
   <div class="filters" id="filters"></div>
@@ -340,6 +347,7 @@ const I={
   cover:'<rect x="5" y="3" width="14" height="18" rx="1"/><path d="M9 8h6M9 11h4"/>',
   stack:'<rect x="3" y="16" width="18" height="5" rx="1"/><rect x="5" y="10" width="15" height="5" rx="1"/><rect x="4" y="4" width="16" height="5" rx="1"/>',
   external:'<path d="M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  cloud:'<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>',
   wand:'<path d="M15 4V2M15 16v-2M8 9h2M20 9h2M17.8 11.8 19 13M17.8 6.2 19 5M12.2 6.2 11 5M3 21l9-9"/>',
 };
 const ic=(n,cls='')=>`<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${I[n]}</svg>`;
@@ -380,7 +388,7 @@ const DB={db:null,ls:false,
   set(k,v){if(this.ls){try{localStorage.setItem('mb-'+k,JSON.stringify(v));return Promise.resolve()}catch(e){return Promise.reject(new Error('este navegador no permite guardar aquí'))}}return new Promise((res,rej)=>{const tx=this.db.transaction('kv','readwrite');tx.objectStore('kv').put(v,k);tx.oncomplete=()=>res();tx.onerror=()=>rej(tx.error)})}
 };
 let state=null, saveT=null;
-function save(){clearTimeout(saveT);saveT=setTimeout(()=>DB.set('state',state).catch(e=>toast('No se pudo guardar: '+e.message)),250)}
+function save(){state.updatedAt=Date.now();clearTimeout(saveT);saveT=setTimeout(()=>DB.set('state',state).catch(e=>toast('No se pudo guardar: '+e.message)),250);Cloud.schedulePush()}
 function defaultState(){
   const s=[{id:uid(),name:'Mis favoritos'},{id:uid(),name:'Fantasía y aventura'},{id:uid(),name:'Por leer'}];
   return {version:1,books:[],shelves:s,settings:{title:'Mi Biblioteca',theme:'ravenclaw',custom:null,wood:'nogal',defaultDisplay:'spine'}};
@@ -467,6 +475,7 @@ function renderChrome(){
   $('#tabs').innerHTML=[['shelf','shelf','Estantería'],['list','list','Lista'],['stats','chart','Estadísticas']].map(([v,i,l])=>`<button class="tab ${ui.view===v?'on':''}" data-act="view" data-v="${v}">${ic(i)}<span>${l}</span></button>`).join('');
   $('#addBtn').innerHTML=`${ic('plus')}<span>Añadir libro</span>`;
   $('#setBtn').innerHTML=ic('palette');
+  $('#cloudBtn').innerHTML=ic('cloud');Cloud.paint();
   const B=state.books;
   const cnt={all:B.length,deseado:B.filter(b=>b.format==='deseado').length};
   for(const k in STATUS)cnt[k]=B.filter(b=>b.status===k).length;
@@ -790,6 +799,14 @@ function openSettings(){
   const s=state.settings,cur=currentColors();
   openModal(`<button class="btn icon-btn x" data-act="close" title="Cerrar">${ic('x')}</button>
   <h2 class="m-title">Personalizar</h2>
+  <div class="d-label">Copia en la nube · Google Drive</div>
+  ${Cloud.on()?`<p style="margin:0 0 8px">${ic('cloud')} <span id="cloudStatus">${esc(Cloud.label())}</span></p>
+    <div class="row wrap"><button class="btn" data-act="cloud-sync">Sincronizar ahora</button><button class="btn" data-act="cloud-link">Enlace para otro dispositivo</button><button class="btn danger" data-act="cloud-off">Desconectar</button></div>
+    <input id="cloudLinkOut" readonly hidden style="margin-top:8px">
+    <p class="hint">Se sincroniza sola cada vez que cambias algo. En tu Drive, carpeta «Mi Biblioteca (copias)», queda además una copia de cada día (los últimos 30).</p>`
+  :`<p class="hint" style="margin-top:0">Guarda tu biblioteca en tu Google Drive y tenla igual en el móvil y en el ordenador.</p>
+    <div class="grid2"><input id="cloudUrl" placeholder="Dirección del script (https://script.google.com/macros/s/…/exec)" autocomplete="off"><input id="cloudKey" placeholder="Clave secreta" autocomplete="off"></div>
+    <div class="row" style="margin-top:8px"><button class="btn gold" data-act="cloud-connect">${ic('cloud')} Conectar</button></div>`}
   <div class="d-label">Nombre de tu biblioteca</div>
   <input id="setTitle" value="${esc(s.title)}">
   <div class="d-label">Paleta de colores</div>
@@ -891,7 +908,14 @@ document.addEventListener('click',async e=>{
     case 'def-display':state.settings.defaultDisplay=a.dataset.d;save();openSettings();break;
     case 'export':{const blob=new Blob([JSON.stringify(state,null,1)],{type:'application/json'});const u=URL.createObjectURL(blob);const l=document.createElement('a');l.href=u;l.download=`mi-biblioteca-${today()}.json`;l.click();setTimeout(()=>URL.revokeObjectURL(u),2000);toast('Copia descargada');break}
     case 'import':$('#jsonIn').value='';$('#jsonIn').click();break;
-    case 'wipe':if(confirm('¿Borrar TODOS los libros y ajustes?')&&confirm('¿Seguro? No se puede deshacer (salvo que tengas una copia exportada).')){state=defaultState();applyTheme();save();closeModal();render();toast('Biblioteca vacía')}break;
+    case 'cloud-connect':cloudConnect($('#cloudUrl').value,$('#cloudKey').value);break;
+    case 'cloud-sync':Cloud.pull(true).then(()=>{if(Cloud.status==='ok')toast('Sincronizado')});break;
+    case 'cloud-off':if(confirm('¿Desconectar este dispositivo de la nube? Tus libros siguen aquí y en tu Drive.')){Cloud.cfg=null;Cloud.saveCfg();Cloud.set('off');openSettings()}break;
+    case 'cloud-link':{const link=location.origin+location.pathname+'#nube='+encodeURIComponent(btoa(JSON.stringify({u:Cloud.cfg.url,k:Cloud.cfg.key})));
+      const out=$('#cloudLinkOut');out.value=link;out.hidden=false;out.select();
+      try{await navigator.clipboard.writeText(link);toast('Enlace copiado. Ábrelo en tu otro dispositivo')}catch(err){toast('Copia el enlace que aparece debajo')}
+      break}
+    case 'wipe':if(confirm('¿Borrar TODOS los libros y ajustes? Si tienes la nube conectada, también se vaciará allí (en tu Drive quedan las copias diarias).')&&confirm('¿Seguro? No se puede deshacer (salvo que tengas una copia exportada).')){state=defaultState();applyTheme();save();closeModal();render();toast('Biblioteca vacía')}break;
   }
 });
 // estrellas
@@ -971,6 +995,77 @@ document.addEventListener('drop',e=>{
   moveBook(dragId,sid,beforeId);
 });
 
+/* ================= Nube (tu Google Drive vía Apps Script) ================= */
+const errMsg=e=>!e?'error':(e.message==='Failed to fetch'||e.name==='TypeError')?'sin conexión a internet':e.message;
+const Cloud={cfg:null,status:'off',msg:'',timer:null,busy:false,
+  on(){return !!(this.cfg&&this.cfg.url&&this.cfg.key)},
+  async load(){try{this.cfg=await DB.get('sync')}catch(e){this.cfg=null}this.set(this.on()?'ok':'off')},
+  async saveCfg(){try{await DB.set('sync',this.cfg)}catch(e){}},
+  set(s,m){this.status=s;this.msg=m||'';this.paint()},
+  label(){
+    if(!this.on())return 'No conectada';
+    if(this.status==='busy')return 'Sincronizando…';
+    if(this.status==='err')return 'No se ha podido sincronizar: '+this.msg+'. Lo reintentaré en el próximo cambio.';
+    return 'Conectada · última sincronización: '+(this.cfg.last?new Date(this.cfg.last).toLocaleString('es-ES',{dateStyle:'short',timeStyle:'short'}):'nunca');
+  },
+  paint(){
+    const b=$('#cloudBtn');if(b){b.hidden=!this.on();b.className='btn icon-btn cloud-'+this.status;b.title=this.label()}
+    const s=$('#cloudStatus');if(s)s.textContent=this.label();
+  },
+  async get(){
+    const r=await fetch(this.cfg.url+(this.cfg.url.includes('?')?'&':'?')+'key='+encodeURIComponent(this.cfg.key));
+    const j=await r.json().catch(()=>{throw new Error('la dirección del script no es correcta')});
+    if(!j.ok)throw new Error(j.error==='clave'?'la clave secreta no coincide':j.error||'error');
+    return j.data;
+  },
+  async put(data){
+    const r=await fetch(this.cfg.url,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({key:this.cfg.key,data})});
+    const j=await r.json().catch(()=>{throw new Error('la dirección del script no es correcta')});
+    if(!j.ok)throw new Error(j.error==='clave'?'la clave secreta no coincide':j.error||'error');
+  },
+  schedulePush(){if(!this.on())return;clearTimeout(this.timer);this.set('busy');this.timer=setTimeout(()=>this.push(),2500)},
+  async push(){
+    if(!this.on())return;
+    try{this.set('busy');await this.put(state);this.cfg.last=Date.now();await this.saveCfg();this.set('ok')}
+    catch(e){this.set('err',errMsg(e))}
+  },
+  async pull(){
+    if(!this.on()||this.busy)return;this.busy=true;
+    try{
+      this.set('busy');const remote=await this.get();
+      const rAt=remote?.updatedAt||0,lAt=state.updatedAt||0;
+      if(remote&&Array.isArray(remote.books)&&rAt>lAt){adoptState(remote);toast('Biblioteca actualizada desde la nube')}
+      else if(lAt>rAt)await this.put(state);
+      this.cfg.last=Date.now();await this.saveCfg();this.set('ok');
+    }catch(e){this.set('err',errMsg(e))}
+    finally{this.busy=false}
+  },
+};
+function adoptState(s){
+  state=s;state.settings={...defaultState().settings,...s.settings};
+  if(!state.shelves?.length)state.shelves=defaultState().shelves;
+  DB.set('state',state).catch(()=>{});applyTheme();render();
+}
+async function cloudConnect(url,key){
+  url=(url||'').trim();key=(key||'').trim();
+  if(!/^https:\/\/script\.google(usercontent)?\.com\//.test(url)){toast('La dirección debe empezar por https://script.google.com/');return}
+  if(!key){toast('Falta la clave secreta');return}
+  Cloud.cfg={url,key};Cloud.set('busy');toast('Conectando con tu Google Drive…');
+  try{
+    const remote=await Cloud.get();
+    const rN=remote?.books?.length||0,lN=state.books.length;
+    let useCloud=rN>0&&lN===0;
+    if(rN>0&&lN>0)useCloud=confirm(`En la nube hay ${rN} libros y en este dispositivo ${lN}.\n\nAceptar: quedarme con los de la nube (lo normal si ya la usabas en otro dispositivo).\nCancelar: subir a la nube los de este dispositivo.`);
+    if(useCloud)adoptState(remote);
+    else{if(!state.updatedAt)state.updatedAt=Date.now();await Cloud.put(state)}
+    Cloud.cfg.last=Date.now();await Cloud.saveCfg();Cloud.set('ok');
+    toast('Conectada a tu Google Drive');
+  }catch(e){Cloud.cfg=null;Cloud.set('off');toast('No he podido conectar: '+errMsg(e))}
+  if($('#modalWrap').classList.contains('open'))openSettings();
+}
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')Cloud.pull()});
+window.addEventListener('online',()=>{if(Cloud.status==='err')Cloud.push()});
+
 /* ================= Inicio ================= */
 (async function init(){
   try{await DB.open()}catch(e){DB.ls=true}
@@ -979,6 +1074,12 @@ document.addEventListener('drop',e=>{
   state.settings={...defaultState().settings,...state.settings};
   if(!state.shelves?.length)state.shelves=defaultState().shelves;
   applyTheme();render();
+  await Cloud.load();
+  // Enlace de conexión desde otro dispositivo: …#nube=…
+  if(location.hash.startsWith('#nube=')){
+    try{const c=JSON.parse(atob(decodeURIComponent(location.hash.slice(6))));history.replaceState(null,'',location.pathname);await cloudConnect(c.u,c.k)}
+    catch(e){toast('Ese enlace de conexión no es válido')}
+  }else if(Cloud.on())Cloud.pull();
 })();
 </script>
 </body>
