@@ -516,7 +516,8 @@ function render(){
 }
 function shelfView(){
   let html='';
-  if(!state.books.length)html+=`<div class="welcome"><h2>Tu biblioteca te espera</h2><p class="muted">Añade tu primer libro: busca por título o ISBN y traeré la portada y la sinopsis de internet.</p><div class="row"><button class="btn gold" data-act="add-book">${ic('plus')} Añadir mi primer libro</button><button class="btn" data-act="samples">${ic('wand')} Ver con libros de ejemplo</button></div></div>`;
+  if(!state.books.length)html+=`<div class="welcome"><h2>Tu biblioteca te espera</h2><p class="muted">Añade tu primer libro: busca por título o ISBN y traeré la portada y la sinopsis de internet.</p><div class="row"><button class="btn gold" data-act="add-book">${ic('plus')} Añadir mi primer libro</button><button class="btn" data-act="samples">${ic('wand')} Ver con libros de ejemplo</button></div>
+    ${Cloud.on()?'':`<div class="d-label" style="margin-top:22px">¿Ya tienes tus libros en la nube?</div><p class="muted" style="margin-top:0">Pega tu enlace de conexión (el que empieza por https://carmen497.github.io/biblioteca/#nube=…) y los traigo.</p>${cloudLinkBox()}`}</div>`;
   const reading=state.books.filter(b=>b.status==='leyendo');
   if(reading.length){
     html+=`<h2 class="section-t">Leyendo ahora</h2><div class="reading">${reading.map(b=>{const p=progressOf(b);return `<button class="rcard" data-open="${b.id}"><div class="thumb">${coverEl(b)}</div><div style="flex:1;min-width:0"><b>${esc(b.title)}</b><div class="a">${esc(b.author)}</div>${num(b.pages)?`<div class="progress"><i style="width:${p}%"></i></div><div class="pct">${p}% · pág. ${num(b.currentPage)||0} de ${num(b.pages)}</div>`:'<div class="pct">Añade las páginas para ver tu progreso</div>'}</div></button>`}).join('')}</div>`;
@@ -1096,9 +1097,11 @@ function openSettings(){
     <div class="row wrap"><button class="btn" data-act="cloud-sync">Sincronizar ahora</button><button class="btn" data-act="cloud-link">Enlace para otro dispositivo</button><button class="btn danger" data-act="cloud-off">Desconectar</button></div>
     <input id="cloudLinkOut" readonly hidden style="margin-top:8px">
     <p class="hint">Se sincroniza sola cada vez que cambias algo. En tu Drive, carpeta «Mi Biblioteca (copias)», queda además una copia de cada día (los últimos 30).</p>`
-  :`<p class="hint" style="margin-top:0">Guarda tu biblioteca en tu Google Drive y tenla igual en el móvil y en el ordenador.</p>
-    <div class="grid2"><input id="cloudUrl" placeholder="Dirección del script (https://script.google.com/macros/s/…/exec)" autocomplete="off"><input id="cloudKey" placeholder="Clave secreta" autocomplete="off"></div>
-    <div class="row" style="margin-top:8px"><button class="btn gold" data-act="cloud-connect">${ic('cloud')} Conectar</button></div>`}
+  :`<p class="hint" style="margin-top:0">Guarda tu biblioteca en tu Google Drive y tenla igual en el móvil y en el ordenador. Si ya la usas en otro dispositivo, pega aquí tu enlace de conexión:</p>
+    ${cloudLinkBox()}
+    <details style="margin-top:10px"><summary>Conectar con la dirección del script y la clave</summary>
+    <div class="grid2" style="margin-top:8px"><input id="cloudUrl" placeholder="Dirección del script (https://script.google.com/macros/s/…/exec)" autocomplete="off"><input id="cloudKey" placeholder="Clave secreta" autocomplete="off"></div>
+    <div class="row" style="margin-top:8px"><button class="btn" data-act="cloud-connect">${ic('cloud')} Conectar</button></div></details>`}
   <div class="d-label">Nombre de tu biblioteca</div>
   <input id="setTitle" value="${esc(s.title)}">
   <div class="d-label">Paleta de colores</div>
@@ -1212,6 +1215,10 @@ document.addEventListener('click',async e=>{
     case 'add-genre':addGenreFromInput();break;
     case 'find-cover':findCoverForDraft();break;
     case 'cloud-connect':cloudConnect($('#cloudUrl').value,$('#cloudKey').value);break;
+    case 'cloud-paste':{const inp=a.parentElement.querySelector('.cloud-link-in');let v=(inp?.value||'').trim();
+      if(!v){try{v=(await navigator.clipboard.readText()).trim();if(inp)inp.value=v}catch(err){}}
+      const c=parseCloudLink(v);if(!c){toast(v?'Ese enlace no es válido: tiene que llevar «#nube=»':'Pega primero tu enlace de conexión');inp?.focus();break}
+      await cloudConnect(c.u,c.k);break}
     case 'cloud-sync':Cloud.pull(true).then(()=>{if(Cloud.status==='ok')toast('Sincronizado')});break;
     case 'cloud-off':if(confirm('¿Desconectar este dispositivo de la nube? Tus libros siguen aquí y en tu Drive.')){Cloud.cfg=null;Cloud.saveCfg();Cloud.set('off');openSettings()}break;
     case 'cloud-link':{const link=location.origin+location.pathname+'#nube='+encodeURIComponent(btoa(JSON.stringify({u:Cloud.cfg.url,k:Cloud.cfg.key})));
@@ -1353,6 +1360,12 @@ function adoptState(s){
   if(!state.shelves?.length)state.shelves=defaultState().shelves;
   DB.set('state',state).catch(()=>{});applyTheme();render();
 }
+// Casilla para pegar el enlace …#nube=… (en iPhone, la app de la pantalla de inicio no comparte datos con Safari ni tiene barra de direcciones)
+const cloudLinkBox=()=>`<div class="row"><input class="cloud-link-in" placeholder="Pega aquí tu enlace de conexión…" autocomplete="off" autocapitalize="off" spellcheck="false"><button class="btn gold" data-act="cloud-paste">${ic('cloud')} Conectar</button></div>`;
+function parseCloudLink(s){
+  const m=String(s||'').match(/nube=([^\s&]+)/);if(!m)return null;
+  try{const c=JSON.parse(atob(decodeURIComponent(m[1])));return c&&c.u&&c.k?c:null}catch(e){return null}
+}
 async function cloudConnect(url,key){
   url=(url||'').trim();key=(key||'').trim();
   if(!/^https:\/\/script\.google(usercontent)?\.com\//.test(url)){toast('La dirección debe empezar por https://script.google.com/');return}
@@ -1381,7 +1394,7 @@ window.addEventListener('online',()=>{if(Cloud.status==='err')Cloud.push()});
   state.settings={...defaultState().settings,...state.settings};
   if(!state.shelves?.length)state.shelves=defaultState().shelves;
   applyTheme();render();
-  await Cloud.load();
+  await Cloud.load();if(!state.books.length)render();
   // Enlace de conexión desde otro dispositivo: …#nube=…
   if(location.hash.startsWith('#nube=')){
     try{const c=JSON.parse(atob(decodeURIComponent(location.hash.slice(6))));history.replaceState(null,'',location.pathname);await cloudConnect(c.u,c.k)}
